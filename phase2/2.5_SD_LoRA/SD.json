@@ -1,0 +1,563 @@
+{
+  "id": "db78fc17-b21d-4662-9f87-3a2313217659",
+  "revision": 0,
+  "last_node_id": 10,
+  "last_link_id": 13,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "FreeU",
+      "pos": [
+        507.53330775669644,
+        -133.2153959728432
+      ],
+      "size": [
+        210,
+        130
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "FreeU"
+      },
+      "widgets_values": [
+        1.1,
+        1.2,
+        0.9,
+        0.2
+      ],
+      "widgets_values_named": {
+        "b1": 1.1,
+        "b2": 1.2,
+        "s1": 0.9,
+        "s2": 0.2
+      }
+    },
+    {
+      "id": 9,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        146.44995882293273,
+        -135.85588664289284
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "my_lora_comfy.safetensors",
+        1
+      ],
+      "widgets_values_named": {
+        "lora_name": "my_lora_comfy.safetensors",
+        "strength_model": 1
+      }
+    },
+    {
+      "id": 1,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        -260.49554734003107,
+        -138.02577427455364
+      ],
+      "size": [
+        315,
+        98
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            10
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            2,
+            3
+          ]
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "v1-5-pruned-emaonly-fp16.safetensors"
+      ],
+      "widgets_values_named": {
+        "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"
+      }
+    },
+    {
+      "id": 3,
+      "type": "CLIPTextEncode",
+      "pos": [
+        240.95723470052104,
+        -390.3866722470238
+      ],
+      "size": [
+        422,
+        164
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "blurry, low quality, bad anatomy, watermark, text, ugly, mutation, extra limbs"
+      ],
+      "widgets_values_named": {
+        "text": "blurry, low quality, bad anatomy, watermark, text, ugly, mutation, extra limbs"
+      }
+    },
+    {
+      "id": 6,
+      "type": "VAEDecode",
+      "pos": [
+        874.6083617636987,
+        -113.07036825078838
+      ],
+      "size": [
+        210,
+        46
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "VAEDecode"
+      }
+    },
+    {
+      "id": 4,
+      "type": "EmptyLatentImage",
+      "pos": [
+        28.99293082821323,
+        114.59690636974817
+      ],
+      "size": [
+        315,
+        106
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        512,
+        512,
+        1
+      ],
+      "widgets_values_named": {
+        "width": 512,
+        "height": 512,
+        "batch_size": 1
+      }
+    },
+    {
+      "id": 8,
+      "type": "Note",
+      "pos": [
+        -422.4942452566966,
+        436.679268973214
+      ],
+      "size": [
+        540,
+        380
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "text": "NeuralDrift workflow. Review dependencies on the workflow page. Hardware compatibility and generation speed require an actual test."
+      },
+      "widgets_values": [
+        "NeuralDrift workflow. Review dependencies on the workflow page. Hardware compatibility and generation speed require an actual test."
+      ],
+      "widgets_values_named": {
+        "text": "NeuralDrift workflow. Review dependencies on the workflow page. Hardware compatibility and generation speed require an actual test."
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 5,
+      "type": "KSampler",
+      "pos": [
+        478.64221002142034,
+        56.54147287470663
+      ],
+      "size": [
+        315,
+        262
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 13
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 4
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 5
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "KSampler"
+      },
+      "widgets_values": [
+        42,
+        "fixed",
+        20,
+        7.5,
+        "dpmpp_2m",
+        "normal",
+        1
+      ],
+      "widgets_values_named": {
+        "seed": 42,
+        "control_after_generate": "fixed",
+        "steps": 20,
+        "cfg": 7.5,
+        "sampler_name": "dpmpp_2m",
+        "scheduler": "normal",
+        "denoise": 1
+      }
+    },
+    {
+      "id": 7,
+      "type": "SaveImage",
+      "pos": [
+        1161.6582227415458,
+        -528.09355640512
+      ],
+      "size": [
+        923.1759332333336,
+        819.0653260421477
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "nh_sd15"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "nh_sd15"
+      }
+    },
+    {
+      "id": 2,
+      "type": "CLIPTextEncode",
+      "pos": [
+        238.13720703124997,
+        -607.4773821149552
+      ],
+      "size": [
+        422,
+        164
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "a fantasy castle on a cliff at sunset, dramatic sky, detailed, artstation trending"
+      ],
+      "widgets_values_named": {
+        "text": "a fantasy castle on a cliff at sunset, dramatic sky, detailed, artstation trending"
+      }
+    }
+  ],
+  "links": [
+    [
+      2,
+      1,
+      1,
+      2,
+      0,
+      "CLIP"
+    ],
+    [
+      3,
+      1,
+      1,
+      3,
+      0,
+      "CLIP"
+    ],
+    [
+      4,
+      2,
+      0,
+      5,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      5,
+      3,
+      0,
+      5,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      6,
+      4,
+      0,
+      5,
+      3,
+      "LATENT"
+    ],
+    [
+      7,
+      5,
+      0,
+      6,
+      0,
+      "LATENT"
+    ],
+    [
+      8,
+      1,
+      2,
+      6,
+      1,
+      "VAE"
+    ],
+    [
+      9,
+      6,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      10,
+      1,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      12,
+      9,
+      0,
+      10,
+      0,
+      "MODEL"
+    ],
+    [
+      13,
+      10,
+      0,
+      5,
+      0,
+      "MODEL"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8060737781184126,
+      "offset": [
+        29.25186462957998,
+        715.1087807742771
+      ]
+    },
+    "neuraldrift": {
+      "catalogId": "04",
+      "source": "Existing NeuralDrift workflow asset",
+      "sourceAsset": "06-sd15-classic.json",
+      "license": null,
+      "executionTested": false
+    },
+    "frontendVersion": "1.52.7"
+  },
+  "version": 0.4
+}
