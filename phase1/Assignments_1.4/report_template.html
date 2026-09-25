@@ -1,0 +1,314 @@
+<meta charset="utf-8">
+<title>CharGPT &amp; BPE Teardown</title>
+<!--__CHROME__-->
+
+<div class="viz-root" id="root">
+  <h1>Assignment 1.4 — Attention, Character GPT, BPE</h1>
+  <p class="lede" id="lede"></p>
+  <div class="tiles" id="tiles"></div>
+
+  <h2>1 · Training run</h2>
+  <p>Both curves come from the saved history; the perplexity panel marks the assignment's target of 5.</p>
+  <div class="cards2">
+    <div class="card"><h3>Loss — train vs validation</h3><div id="c-loss"></div></div>
+    <div class="card"><h3 id="ppl-title">Validation perplexity</h3><div id="c-ppl"></div></div>
+  </div>
+
+  <h2>2 · Attention maps — all 6 layers × 6 heads</h2>
+  <p>A real forward pass over the first 64 characters of Tiny Shakespeare. Row = query
+     position, column = the key it attends to. The upper-right triangle is empty in every
+     map: that blank wedge <em>is</em> the causal mask working. Click any map to inspect it.</p>
+  <div class="card">
+    <div class="legend">
+      <span><span class="rampbar" id="ramp-legend"></span>&nbsp;attention weight 0 → 1</span>
+    </div>
+    <div class="scroll"><div class="attn-grid" id="attn-grid"></div></div>
+  </div>
+  <div class="card">
+    <h3 id="detail-title">Selected head</h3>
+    <div class="scroll"><div id="detail"></div></div>
+  </div>
+
+  <h3>What each head learned to do</h3>
+  <p>Entropy is how spread out a head's attention is (low = focused on a few positions).
+     Span is the mean distance back to the characters it reads. Colour encodes depth.</p>
+  <div class="cards2">
+    <div class="card"><div id="c-heads"></div></div>
+    <div class="card scroll"><div id="t-heads"></div></div>
+  </div>
+
+  <h2>3 · Where the model is confident</h2>
+  <p>Per-character cross-entropy on a held-out passage — the stronger the colour, the more
+     surprised the model was. Structure it has memorised (speaker names, line breaks) costs
+     almost nothing; the first letter of a new word costs the most. Hover any character for
+     its loss and probability.</p>
+  <div class="card">
+    <div class="legend"><span><span class="rampbar" id="ramp-legend2"></span>&nbsp;loss 0 → <span id="loss-max"></span> nats</span></div>
+    <div class="heat-text" id="charloss"></div>
+  </div>
+
+  <div class="cards2">
+    <div class="card"><h3>Next-character distribution</h3><p id="pred-ctx"></p><div id="c-pred"></div></div>
+    <div class="card"><h3>Positional embedding similarity</h3>
+      <p>Cosine similarity between learned position vectors. The bright diagonal band means
+         nearby positions learned similar encodings — locality, learned not hard-coded.</p>
+      <div id="c-pos"></div></div>
+  </div>
+
+  <h2>4 · Generated text</h2>
+  <p>Sampled from the restored checkpoint with the prompt <code>ROMEO:</code>.</p>
+  <div class="tabs" id="sample-tabs"></div>
+  <div class="card"><pre class="sample" id="sample-out"></pre></div>
+
+  <h2>5 · BPE — the three split patterns</h2>
+  <p>Pre-tokenisation runs before BPE and decides which characters may ever be merged
+     together. The same probe strings through each pattern:</p>
+  <div class="card scroll" id="t-patterns"></div>
+
+  <h2>6 · BPE — compression</h2>
+  <p>A tokenizer trained on Tiny Shakespeare, measured on held-out text it never saw.
+     Each doubling of the vocabulary buys less than the last.</p>
+  <div class="cards2">
+    <div class="card"><h3>Bytes per token vs vocabulary size</h3><div id="c-comp"></div></div>
+    <div class="card scroll"><h3>First merges learned</h3><div id="t-merges"></div></div>
+  </div>
+
+  <h2>7 · Verification against tiktoken</h2>
+  <p id="tik-lede"></p>
+  <div class="tiles" id="tik-tiles"></div>
+  <div class="card">
+    <h3>Token boundaries — ours vs tiktoken <code>cl100k_base</code></h3>
+    <p>Alternating shades mark token boundaries. Identical boundaries and identical IDs
+       on both rows is the visual form of the assertion in the test file.</p>
+    <div id="segview"></div>
+  </div>
+  <div class="card scroll"><h3>Per-sample check</h3><div id="t-tik"></div></div>
+
+  <p class="cap" id="footer"></p>
+</div>
+
+<script>
+const DATA = /*__REPORT_DATA__*/null;
+const P2 = DATA.part2, P3 = DATA.part3 || {};
+
+function render() {
+  /* ---- header ---- */
+  const cfg = P2.config, ppl = P2.measured_val_ppl;
+  $('lede').innerHTML =
+    `Everything below is computed from the saved checkpoint <code>${esc(P2.checkpoint)}</code> ` +
+    `(step ${P2.step}) by forward pass only — no retraining. Device: <code>${esc(P2.device)}</code>.`;
+  $('tiles').innerHTML = [
+    ['Validation perplexity', ppl.toFixed(3), `target &lt; 5 · <span class="${ppl<5?'ok':'bad'}">${ppl<5?'PASS':'FAIL'}</span>`],
+    ['Validation loss', P2.measured.val.toFixed(4), `saved ${P2.saved_val_loss.toFixed(4)} · train ${P2.measured.train.toFixed(4)}`],
+    ['Parameters', (P2.parameters/1e6).toFixed(2) + 'M', `${cfg.n_layer} layers × ${cfg.n_head} heads · d=${cfg.n_embd}`],
+    ['Context', cfg.block_size, `char vocab ${cfg.vocab_size} · dropout ${cfg.dropout}`],
+  ].map(([k,val,s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${s}</div></div>`).join('');
+
+  /* ---- training curves ---- */
+  const runName = P2.checkpoint.split(/[\\/]/)[0];
+  const hist = P2.histories[runName] || Object.values(P2.histories)[0];
+  lineChart($('c-loss'), [
+    { name: 'train', color: v('--series-1'), points: hist.map(r => [r.step, r.train_loss]) },
+    { name: 'validation', color: v('--series-2'), points: hist.map(r => [r.step, r.val_loss]) },
+  ], { dp: 2, caption: `run ${runName} · cross-entropy in nats` });
+
+  /* one line per surviving run — reads as a single curve once the older runs are pruned */
+  const runs = Object.keys(P2.histories).sort((a,b) => P2.histories[b].length - P2.histories[a].length);
+  const cols = [v('--series-1'), v('--series-2'), v('--series-3')];
+  if (runs.length > 1) $('ppl-title').textContent = 'Validation perplexity by run';
+  /* find where the best run first dips under the target, rather than stating a fixed step */
+  const best = P2.histories[runs[0]];
+  const crossed = best.findIndex((r, i) => i > 0 && best[i-1].val_perplexity >= 5 && r.val_perplexity < 5);
+  lineChart($('c-ppl'), runs.slice(0,3).map((name, i) => ({
+    name: name.replace('outputs_', ''), color: cols[i],
+    points: P2.histories[name].map(r => [r.step, r.val_perplexity]),
+  })), { dp: 1, refValue: 5, refLabel: 'target 5', directLabel: false, logY: true,
+         caption: 'log scale · lower is better' + (crossed > 0
+           ? ` · crosses the target between step ${best[crossed-1].step} and ${best[crossed].step}`
+           : '') });
+
+  /* ---- attention grid ---- */
+  const grid = $('attn-grid'), passage = P2.passage, N = passage.length;
+  grid.innerHTML = '<div class="axl"></div>' +
+    Array.from({length: cfg.n_head}, (_, h) => `<div class="axl">H${h}</div>`).join('');
+  P2.attention.forEach((m, i) => {
+    if (m.head === 0) {
+      const lab = document.createElement('div');
+      lab.className = 'axl'; lab.textContent = 'L' + m.layer;
+      grid.appendChild(lab);
+    }
+    const c = document.createElement('canvas');
+    c.dataset.i = i; c.title = `layer ${m.layer}, head ${m.head}`;
+    drawHeat(c, decodeU8(m.data), N);
+    c.addEventListener('click', () => selectHead(i));
+    grid.appendChild(c);
+  });
+  $('ramp-legend').style.background = `linear-gradient(90deg, ${rampColor(0)}, ${rampColor(.5)}, ${rampColor(1)})`;
+  $('ramp-legend2').style.background = $('ramp-legend').style.background;
+
+  function selectHead(i) {
+    grid.querySelectorAll('canvas').forEach(c => c.classList.toggle('sel', +c.dataset.i === i));
+    const m = P2.attention[i], st = P2.head_stats[i], bytes = decodeU8(m.data);
+    $('detail-title').textContent = `Layer ${m.layer}, head ${m.head}`;
+    const cell = 15, pad = 34, S = N * cell;
+    let g = '';
+    for (let r = 0; r < N; r++) for (let c2 = 0; c2 <= r; c2++) {
+      const w = bytes[r*N + c2] / 255;
+      g += `<rect x="${pad + c2*cell}" y="${pad + r*cell}" width="${cell-1}" height="${cell-1}" rx="1.5"
+             fill="${rampColor(w)}" data-t="query <b>${esc(vis(passage[r]))}</b> (pos ${r}) → key <b>${esc(vis(passage[c2]))}</b> (pos ${c2})<br>weight <b>${w.toFixed(3)}</b>"/>`;
+    }
+    for (let k = 0; k < N; k++) {
+      g += `<text x="${pad + k*cell + cell/2}" y="${pad-6}" text-anchor="middle" font-size="9" fill="${v('--text-muted')}" font-family="ui-monospace,monospace">${esc(vis(passage[k])).slice(0,2)}</text>`;
+      g += `<text x="${pad-6}" y="${pad + k*cell + cell/2 + 3}" text-anchor="end" font-size="9" fill="${v('--text-muted')}" font-family="ui-monospace,monospace">${esc(vis(passage[k])).slice(0,2)}</text>`;
+    }
+    $('detail').innerHTML =
+      `<div class="cap">entropy ${st.entropy.toFixed(2)} · mean span ${st.span.toFixed(1)} chars back · ` +
+      `self ${(st.self*100).toFixed(0)}% · previous-char ${(st.previous*100).toFixed(0)}% · first-char sink ${(st.sink*100).toFixed(0)}%</div>` +
+      `<svg viewBox="0 0 ${S+pad+8} ${S+pad+8}" width="${S+pad+8}" height="${S+pad+8}">${g}</svg>` +
+      `<div class="cap">columns = keys (what is read) · rows = queries (who is reading)</div>`;
+    bindTips($('detail'), 'rect');
+  }
+  selectHead(P2.head_stats.reduce((best, s, i) => s.previous > P2.head_stats[best].previous ? i : best, 0));
+
+  /* ---- head taxonomy ---- */
+  const W = 470, H = 300, m = { t: 14, r: 16, b: 40, l: 44 };
+  const sx1 = Math.max(...P2.head_stats.map(s => s.span)) * 1.08;
+  const sy1 = Math.max(...P2.head_stats.map(s => s.entropy)) * 1.1;
+  const SX = x => m.l + x/sx1*(W-m.l-m.r), SY = y => H-m.b - y/sy1*(H-m.t-m.b);
+  let hg = '';
+  for (let i = 0; i <= 4; i++) {
+    const y = sy1*i/4, x = sx1*i/4;
+    hg += `<line x1="${m.l}" x2="${W-m.r}" y1="${SY(y).toFixed(1)}" y2="${SY(y).toFixed(1)}" stroke="${v('--grid')}"/>`;
+    hg += `<text x="${m.l-7}" y="${(SY(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="${v('--text-muted')}">${y.toFixed(1)}</text>`;
+    hg += `<text x="${SX(x).toFixed(1)}" y="${H-24}" text-anchor="middle" font-size="10" fill="${v('--text-muted')}">${x.toFixed(0)}</text>`;
+  }
+  hg += `<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="${v('--baseline')}"/>`;
+  hg += `<text x="${W/2}" y="${H-6}" text-anchor="middle" font-size="10" fill="${v('--text-secondary')}">mean span (characters back)</text>`;
+  hg += `<text transform="translate(11,${H/2}) rotate(-90)" text-anchor="middle" font-size="10" fill="${v('--text-secondary')}">attention entropy (nats)</text>`;
+  P2.head_stats.forEach((s, i) => {
+    hg += `<circle cx="${SX(s.span).toFixed(1)}" cy="${SY(s.entropy).toFixed(1)}" r="6"
+      fill="${rampColor(0.25 + 0.75*s.layer/(cfg.n_layer-1))}" stroke="${v('--surface-1')}" stroke-width="2"
+      data-i="${i}" style="cursor:pointer"
+      data-t="<b>L${s.layer} H${s.head}</b><br>entropy ${s.entropy.toFixed(2)} · span ${s.span.toFixed(1)}<br>previous-char ${(s.previous*100).toFixed(0)}% · sink ${(s.sink*100).toFixed(0)}%"/>`;
+  });
+  $('c-heads').innerHTML =
+    `<div class="legend"><span>layer&nbsp;<span class="rampbar" style="width:90px;background:linear-gradient(90deg,${rampColor(.25)},${rampColor(1)})"></span>&nbsp;0 → ${cfg.n_layer-1}</span></div>` +
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${hg}</svg>` +
+    `<div class="cap">each dot is one of the ${P2.head_stats.length} heads · click to open it above</div>`;
+  bindTips($('c-heads'), 'circle');
+  $('c-heads').querySelectorAll('circle').forEach(c =>
+    c.addEventListener('click', () => { selectHead(+c.dataset.i); $('detail').scrollIntoView({behavior:'smooth', block:'center'}); }));
+
+  $('t-heads').innerHTML = `<h3 style="margin-top:0">Most position-locked heads</h3><table>
+    <tr><th>head</th><th class="num">prev-char</th><th class="num">self</th><th class="num">sink</th><th class="num">entropy</th><th class="num">span</th></tr>` +
+    P2.head_stats.slice().sort((a,b) => b.previous - a.previous).slice(0, 8).map(s =>
+      `<tr><td class="mono">L${s.layer} H${s.head}</td>
+      <td class="num">${(s.previous*100).toFixed(0)}%</td><td class="num">${(s.self*100).toFixed(0)}%</td>
+      <td class="num">${(s.sink*100).toFixed(0)}%</td><td class="num">${s.entropy.toFixed(2)}</td>
+      <td class="num">${s.span.toFixed(1)}</td></tr>`).join('') + '</table>';
+
+  /* ---- per-character loss ---- */
+  const maxLoss = Math.max(...P2.char_loss.map(c => c.loss));
+  $('loss-max').textContent = maxLoss.toFixed(1);
+  $('charloss').innerHTML = P2.char_loss.map(c => {
+    const bg = rampColor(c.loss / maxLoss);
+    const body = c.char === '\n' ? '<br>' : esc(c.char);
+    return `<span style="background:${bg};color:${inkOn(bg)}"
+       data-t="<b>${esc(vis(c.char))}</b> · loss ${c.loss.toFixed(2)} nats · p=${Math.exp(-c.loss).toFixed(3)}">${body}</span>`;
+  }).join('');
+  bindTips($('charloss'), 'span');
+
+  /* ---- next-char prediction ---- */
+  $('pred-ctx').innerHTML = 'After <code>' + esc(P2.passage.slice(-28).replace(/\n/g,'\\n')) + '</code>';
+  barChart($('c-pred'), P2.predictions.map(p => ({
+    label: vis(p.char), value: p.p, display: (p.p*100).toFixed(1) + '%',
+  })), { labelW: 30, caption: 'top 10 characters by probability' });
+
+  /* ---- positional embedding ---- */
+  const pos = P2.position_similarity, pc = document.createElement('canvas');
+  pc.style.cssText = 'width:100%;max-width:340px;image-rendering:pixelated;border-radius:6px;border:1px solid ' + v('--border');
+  drawHeat(pc, decodeU8(pos.data), pos.n);
+  $('c-pos').innerHTML = '';
+  $('c-pos').appendChild(pc);
+  const cap = document.createElement('div');
+  cap.className = 'cap';
+  cap.textContent = `${pos.n} × ${pos.n} positions · cosine similarity 0 → ${pos.high.toFixed(2)}`;
+  $('c-pos').appendChild(cap);
+
+  /* ---- samples ---- */
+  const keys = Object.keys(P2.samples);
+  $('sample-tabs').innerHTML = keys.map((k,i) =>
+    `<button aria-pressed="${i===1}" data-k="${esc(k)}">${esc(k)}</button>`).join('');
+  const pick = k => {
+    $('sample-out').textContent = P2.samples[k];
+    $('sample-tabs').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === k));
+  };
+  $('sample-tabs').querySelectorAll('button').forEach(b => b.addEventListener('click', () => pick(b.dataset.k)));
+  pick(keys[1] || keys[0]);
+
+  /* ---- part 3 ---- */
+  if (!P3.curve) return;
+  const show = s => esc(s.replace(/\n/g,'\\n').replace(/ /g,'·'));
+
+  $('t-patterns').innerHTML = '<table><tr><th>pattern</th>' +
+    P3.probes.map(p => `<th>${esc(p.replace(/\n/g,'\\n'))}</th>`).join('') + '</tr>' +
+    P3.patterns.map(row => `<tr><td>${esc(row.label)}</td>` + row.splits.map(parts =>
+      `<td><div class="tokline">${parts.map((t,i) =>
+        `<span class="tok" style="${tokStyle(i)}">${show(t)}</span>`).join('')}</div></td>`).join('') +
+      '</tr>').join('') + '</table>' +
+    '<div class="cap">· marks a leading space that belongs to the token · \\n is a newline</div>';
+
+  lineChart($('c-comp'), [{
+    name: 'bytes / token', color: v('--series-1'),
+    points: P3.curve.map(r => [r.vocab_size, r.bytes_per_token]),
+  }], { dp: 2, xName: 'vocab', yZero: true, directLabel: false,
+        caption: `trained on ${(P3.corpus_chars/1000).toFixed(0)}k chars · measured on ${(P3.holdout_chars/1000).toFixed(0)}k held-out chars` });
+
+  const sym = s => esc(s.replace(/\n/g,'\\n').replace(/ /g,'␣'));
+  $('t-merges').innerHTML = '<table><tr><th class="num">#</th><th>left</th><th>right</th><th>merged</th><th class="num">id</th></tr>' +
+    P3.merges.slice(0, 24).map(r => `<tr><td class="num">${r.rank}</td>
+      <td class="mono">${sym(r.left)}</td><td class="mono">${sym(r.right)}</td>
+      <td class="mono"><b>${sym(r.result)}</b></td><td class="num">${r.id}</td></tr>`).join('') + '</table>';
+
+  const T = P3.tiktoken;
+  if (!T) {
+    $('tik-lede').innerHTML = '<span class="bad">tiktoken is not installed</span> — run <code>pip install tiktoken</code> and re-run this script.';
+    return;
+  }
+  const allOk = T.checks.every(c => c.match) && T.bulk.match && T.special.match;
+  $('tik-lede').innerHTML =
+    `Our tokenizer is rebuilt from tiktoken's rank table — ${T.merges_recovered.toLocaleString()} merge pairs recovered ` +
+    `by replaying BPE on each vocabulary entry — then asked to encode the same text. IDs must match exactly.`;
+  $('tik-tiles').innerHTML = [
+    ['Overall', allOk ? 'PASS' : 'FAIL', `tiktoken ${T.version} · ${T.encoding}`, allOk],
+    ['Bulk corpus', T.bulk.match ? 'exact' : 'differs', `${(T.bulk.chars/1000).toFixed(0)}k chars → ${T.bulk.tokens.toLocaleString()} tokens`, T.bulk.match],
+    ['Edge samples', `${T.checks.filter(c=>c.match).length}/${T.checks.length}`, 'emoji · accents · CJK · code', T.checks.every(c=>c.match)],
+    ['Special tokens', T.special.match ? 'exact' : 'differs', '&lt;|endoftext|&gt; handling', T.special.match],
+  ].map(([k,val,s,ok]) => `<div class="tile"><div class="k">${k}</div>
+      <div class="v ${ok?'ok':'bad'}">${val}</div><div class="s">${s}</div></div>`).join('');
+
+  const segRow = (label, pieces) => `<div style="margin-top:10px"><div class="cap">${label}</div>
+    <div class="tokline">` + pieces.map((p,i) =>
+      `<span class="tok" style="${tokStyle(i)}"
+        data-t="id <b>${p.id}</b> · ${esc(JSON.stringify(p.text))}">${show(p.text)}</span>`).join('') +
+    `</div></div>`;
+  $('segview').innerHTML =
+    segRow(`ours — BytePairEncoding.from_tiktoken('cl100k_base') · ${T.cl100k_segmentation.length} tokens`, T.cl100k_segmentation) +
+    segRow(`our own tokenizer trained on Tiny Shakespeare (vocab 1024) · ${P3.own_segmentation.length} tokens`, P3.own_segmentation);
+  bindTips($('segview'), '.tok');
+
+  $('t-tik').innerHTML = '<table><tr><th>input</th><th class="num">tokens</th><th>match</th><th>segmentation</th></tr>' +
+    T.checks.map(c => `<tr>
+      <td class="mono">${esc(JSON.stringify(c.text)).slice(0,42)}</td>
+      <td class="num">${c.reference.length}</td>
+      <td class="${c.match?'ok':'bad'}">${c.match ? 'exact' : 'differs'}</td>
+      <td><div class="tokline">${c.pieces.map((p,i) =>
+        `<span class="tok" style="${tokStyle(i)}">${show(p)}</span>`).join('')}</div></td>
+    </tr>`).join('') + '</table>';
+
+  $('footer').textContent = 'Generated by visualize_1_4.py — forward passes only, no training.';
+}
+
+render();
+watchTheme(render);
+</script>

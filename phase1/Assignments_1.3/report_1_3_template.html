@@ -1,0 +1,192 @@
+<meta charset="utf-8">
+<title>Conv2D &amp; ResNet50 Transfer</title>
+<!--__CHROME__-->
+
+<div class="viz-root" id="root">
+  <h1>Assignment 1.3 — Conv2D from scratch, ResNet50 transfer learning</h1>
+  <p class="lede" id="lede"></p>
+  <div class="tiles" id="tiles"></div>
+
+  <h2>1 · Learning curves</h2>
+  <p>Colour separates the two runs; a dashed line is training, solid is validation — so the
+     gap between a pair of same-coloured lines is that run's overfitting. The vertical marker
+     is the epoch where the transfer run unfroze <code>layer4</code> and stopped being a
+     frozen feature extractor.</p>
+  <div class="cards2">
+    <div class="card"><h3>Accuracy</h3><div id="c-acc"></div></div>
+    <div class="card"><h3>Loss</h3><div id="c-loss"></div></div>
+  </div>
+
+  <h2>2 · What transfer learning bought</h2>
+  <p id="cost-lede"></p>
+  <div class="cards2">
+    <div class="card"><h3>Test accuracy</h3><div id="c-testacc"></div></div>
+    <div class="card"><h3>Training time</h3><div id="c-time"></div></div>
+  </div>
+  <div class="card">
+    <h3>Validation accuracy against wall-clock time</h3>
+    <p>The same curves plotted against minutes spent rather than epochs elapsed — this is
+       the comparison that matters when GPU time is the budget.</p>
+    <div id="c-eff"></div>
+  </div>
+
+  <h2>3 · Per-epoch detail</h2>
+  <div class="cards2">
+    <div class="card scroll"><h3>Scratch</h3><div id="t-scratch"></div></div>
+    <div class="card scroll"><h3>Transfer</h3><div id="t-transfer"></div></div>
+  </div>
+
+  <h2>4 · Part A — NumPy Conv2D vs PyTorch</h2>
+  <p id="conv-lede"></p>
+  <div class="card scroll"><div id="t-conv"></div></div>
+
+  <h2>5 · Original plots from the run</h2>
+  <p>The matplotlib figures written by <code>train_resnet50_transfer.py</code>, embedded here
+     unchanged so the report stands alone.</p>
+  <div class="cards2" id="plots"></div>
+
+  <p class="cap" id="footer"></p>
+</div>
+
+<script>
+const DATA = /*__REPORT_DATA__*/null;
+const A = DATA.partA, B = DATA.partB;
+const S = B.runs.scratch, T = B.runs.transfer;
+
+const pct = x => (x * 100).toFixed(2) + '%';
+const mins = s => (s / 60).toFixed(1);
+
+function render() {
+  const C1 = v('--series-1'), C2 = v('--series-2');
+  const gap = (T.test_acc - S.test_acc) * 100;
+  const speedup = S.training_time_sec / T.training_time_sec;
+
+  $('lede').innerHTML =
+    `Two ResNet50 runs on a 6-class scene dataset (${esc(B.classes.join(', '))}) — one trained ` +
+    `from random initialisation, one starting from ImageNet weights. Everything below is read ` +
+    `from <code>${esc(B.source)}/metrics.json</code>; the checkpoints are not re-run.`;
+
+  $('tiles').innerHTML = [
+    ['Transfer · test acc', pct(T.test_acc), `${T.epochs} epochs · ${mins(T.training_time_sec)} min`],
+    ['Scratch · test acc', pct(S.test_acc), `${S.epochs} epochs · ${mins(S.training_time_sec)} min`],
+    ['Accuracy gained', '+' + gap.toFixed(2) + ' pp', 'transfer over scratch'],
+    ['Time saved', speedup.toFixed(1) + '×', `${mins(S.training_time_sec - T.training_time_sec)} min less`],
+  ].map(([k, val, s]) =>
+    `<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${esc(s)}</div></div>`).join('');
+
+  /* ---- learning curves ---- */
+  const unfreeze = (T.stages.length > 1) ? T.stages[0].last + 0.5 : null;
+  const curve = (run, key) => run.history.map(r => [r.epoch, r[key] * (key.endsWith('acc') ? 100 : 1)]);
+
+  lineChart($('c-acc'), [
+    { name: 'scratch train',  color: C1, dashed: true,  points: curve(S, 'train_acc') },
+    { name: 'scratch val',    color: C1, points: curve(S, 'val_acc') },
+    { name: 'transfer train', color: C2, dashed: true,  points: curve(T, 'train_acc') },
+    { name: 'transfer val',   color: C2, points: curve(T, 'val_acc') },
+  ], { dp: 1, unit: '%', xName: 'epoch', directLabel: false, yMax: 100,
+       refX: unfreeze, refXLabel: 'unfreeze layer4',
+       caption: 'accuracy in % · higher is better' });
+
+  lineChart($('c-loss'), [
+    { name: 'scratch train',  color: C1, dashed: true,  points: curve(S, 'train_loss') },
+    { name: 'scratch val',    color: C1, points: curve(S, 'val_loss') },
+    { name: 'transfer train', color: C2, dashed: true,  points: curve(T, 'train_loss') },
+    { name: 'transfer val',   color: C2, points: curve(T, 'val_loss') },
+  ], { dp: 2, xName: 'epoch', directLabel: false, yZero: true,
+       refX: unfreeze, refXLabel: 'unfreeze layer4',
+       caption: 'cross-entropy · lower is better' });
+
+  /* ---- the trade ---- */
+  const firstBeat = S.history.find(r => r.val_acc >= T.history[0].val_acc);
+  $('cost-lede').innerHTML =
+    `The transfer run reached <b>${pct(T.history[0].val_acc)}</b> validation accuracy after a single ` +
+    `epoch — higher than anything the scratch run reached in ${S.epochs} epochs ` +
+    `(best <b>${pct(S.best_val_acc)}</b> at epoch ${S.best_val_epoch})` +
+    (firstBeat ? `.` : `, so the scratch curve never catches up.`);
+
+  barChart($('c-testacc'), [
+    { label: 'scratch',  value: S.test_acc * 100, display: pct(S.test_acc), color: C1,
+      note: `test loss ${S.test_loss.toFixed(3)}` },
+    { label: 'transfer', value: T.test_acc * 100, display: pct(T.test_acc), color: C2,
+      note: `test loss ${T.test_loss.toFixed(3)}` },
+  ], { caption: 'held-out test split · bars start at zero' });
+
+  barChart($('c-time'), [
+    { label: 'scratch',  value: S.training_time_sec, display: mins(S.training_time_sec) + ' min', color: C1,
+      note: `${S.epochs} epochs · ${S.sec_per_epoch.toFixed(0)} s/epoch` },
+    { label: 'transfer', value: T.training_time_sec, display: mins(T.training_time_sec) + ' min', color: C2,
+      note: `${T.epochs} epochs · ${T.sec_per_epoch.toFixed(0)} s/epoch` },
+  ], { caption: 'total wall-clock training time' });
+
+  /* ---- accuracy vs wall-clock ---- */
+  const byTime = run => run.history.map(r => [+(r.epoch * run.sec_per_epoch / 60).toFixed(2), r.val_acc * 100]);
+  lineChart($('c-eff'), [
+    { name: 'scratch',  color: C1, points: byTime(S) },
+    { name: 'transfer', color: C2, points: byTime(T) },
+  ], { dp: 1, unit: '%', xName: 'minute', width: 760, height: 260, yMax: 100,
+       caption: 'x = estimated minutes of training · per-epoch cost is taken as each run\'s ' +
+                'total time ÷ its epoch count, so the transfer curve is if anything conservative ' +
+                'early on (its frozen warm-up epochs were the cheap ones)' });
+
+  /* ---- per-epoch tables ---- */
+  const table = (run, host) => {
+    $(host).innerHTML = '<table><tr><th class="num">epoch</th><th>stage</th>' +
+      '<th class="num">train acc</th><th class="num">val acc</th>' +
+      '<th class="num">train loss</th><th class="num">val loss</th></tr>' +
+      run.history.map(r => {
+        const best = r.epoch === run.best_val_epoch;
+        return `<tr${best ? ' style="font-weight:600"' : ''}>
+          <td class="num">${r.epoch}${best ? ' ★' : ''}</td><td>${esc(r.stage)}</td>
+          <td class="num">${(r.train_acc*100).toFixed(2)}</td>
+          <td class="num">${(r.val_acc*100).toFixed(2)}</td>
+          <td class="num">${r.train_loss.toFixed(3)}</td>
+          <td class="num">${r.val_loss.toFixed(3)}</td></tr>`;
+      }).join('') + '</table><div class="cap">★ = best validation epoch (the saved checkpoint)</div>';
+  };
+  table(S, 't-scratch');
+  table(T, 't-transfer');
+
+  /* ---- part A ---- */
+  const allPass = A.cases.every(c => c.passed);
+  $('conv-lede').innerHTML =
+    `The hand-written NumPy convolution is re-run here against <code>torch.nn.functional.conv2d</code> ` +
+    `on ${A.cases.length} configurations — forward output and all three gradients — at a tolerance of ` +
+    `<code>${A.tolerance}</code>. Result: <span class="${allPass?'ok':'bad'}">${allPass ? 'every case matches' : 'a case differs'}</span>.`;
+  $('t-conv').innerHTML = '<table><tr><th>case</th><th>input</th><th>kernel</th><th>stride</th>' +
+    '<th>padding</th><th>output</th><th class="num">max abs error</th><th>verdict</th></tr>' +
+    A.cases.map(c => {
+      const worst = Math.max(...Object.values(c.errors));
+      const detail = Object.entries(c.errors).map(([k, e]) => `${k} ${e.toExponential(1)}`).join(' · ');
+      return `<tr data-t="${esc(detail)}">
+        <td>${esc(c.label)}</td>
+        <td class="mono">${c.input.join('×')}</td>
+        <td class="mono">${c.weight.join('×')}${c.bias ? '' : ' (no bias)'}</td>
+        <td class="mono">${c.stride.join(',')}</td>
+        <td class="mono">${c.padding.join(',')}</td>
+        <td class="mono">${c.output.join('×')}</td>
+        <td class="num mono">${worst.toExponential(1)}</td>
+        <td class="${c.passed?'ok':'bad'}">${c.passed ? 'match' : 'differs'}</td></tr>`;
+    }).join('') + '</table><div class="cap">hover a row for the per-tensor error breakdown</div>';
+  bindTips($('t-conv'), 'tr');
+
+  /* ---- original figures ---- */
+  const titles = {
+    learning_curve_accuracy: 'Learning curve — accuracy',
+    learning_curve_loss: 'Learning curve — loss',
+    test_accuracy_comparison: 'Test accuracy comparison',
+    training_time_comparison: 'Training time comparison',
+  };
+  $('plots').innerHTML = Object.entries(B.plots).map(([name, uri]) =>
+    `<div class="card"><h3 style="margin-top:0">${esc(titles[name] || name)}</h3>
+     <img src="${uri}" alt="${esc(titles[name] || name)}" style="width:100%;border-radius:6px">
+     <div class="cap">${esc(B.source)}/${esc(name)}.png</div></div>`).join('');
+
+  const ck = Object.entries(B.checkpoints)
+    .map(([n, sz]) => `${n} (${(sz/1048576).toFixed(0)} MB)`).join(' · ');
+  $('footer').textContent =
+    'Generated by visualize_1_3.py — reads saved metrics only. Checkpoints on disk: ' + (ck || 'none');
+}
+
+render();
+watchTheme(render);
+</script>
